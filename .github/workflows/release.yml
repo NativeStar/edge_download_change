@@ -6,11 +6,8 @@ name: Release
 # The workflow does everything:
 #   1. bump versionCode (+1) and versionName in the manifest (and BuildInfo.VERSION)
 #   2. commit that to main with [skip ci] (so no extra beta build is triggered)
-#   3. build and sign the APK
-#   4. publish the GitHub release with the tag <versionCode>-<versionName>
-#      (the format the official module repository requires)
-#   5. mirror the same release + APK into the official module repository
-#      (only when the MODULE_REPO_TOKEN secret is configured)
+#   3. build and prepare an unsigned, aligned APK
+#   4. upload it as a workflow artifact for local signing
 on:
   workflow_dispatch:
     inputs:
@@ -23,10 +20,6 @@ on:
 
 permissions:
   contents: write
-
-env:
-  MODULE_REPO: Xposed-Modules-Repo/io.github.lswlc33.edge_download_change
-  MODULE_REPO_TOKEN: ${{ secrets.MODULE_REPO_TOKEN }}
 
 jobs:
   release:
@@ -98,18 +91,16 @@ jobs:
           git commit -m "chore(release): v${{ steps.version.outputs.name }} [skip ci]"
           git push origin "HEAD:${GITHUB_REF_NAME}"
 
-      - name: Build signed APK
+      - name: Build unsigned APK
         id: build
-        env:
-          SIGNING_KEYSTORE_BASE64: ${{ secrets.SIGNING_KEYSTORE_BASE64 }}
-          SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
-          SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
-          SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
         run: |
-          APK="$(bash lsp_module/build.sh | sed -n 's/^done: //p' | tail -1)"
+          set -e
+          bash lsp_module/build.sh
+          APK="edge_download_change-${{ steps.version.outputs.name }}-unsigned.apk"
+          cp lsp_module/build/module-aligned.apk "lsp_module/$APK"
           test -f "lsp_module/$APK" || { echo "::error::build artifact not found: $APK"; exit 1; }
           echo "apk=lsp_module/$APK" >> "$GITHUB_OUTPUT"
-          echo "built: $APK"
+          echo "built unsigned APK: $APK"
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
@@ -118,48 +109,3 @@ jobs:
           path: ${{ steps.build.outputs.apk }}
           if-no-files-found: error
 
-      - name: Publish the GitHub release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ steps.version.outputs.tag }}
-          VER: ${{ steps.version.outputs.name }}
-          NOTES_INPUT: ${{ inputs.notes }}
-        run: |
-          NOTES="$NOTES_INPUT"
-          if [ -z "$NOTES" ]; then
-            NOTES="稳定版 **v${VER}**，已签名，可直接覆盖安装。
-
-          Signed stable build **v${VER}**, built from \`${GITHUB_SHA}\`. Install and usage: see README.md."
-          fi
-          gh release create "$TAG" \
-            --title "v${VER}" \
-            --target "$GITHUB_SHA" \
-            --latest \
-            --notes "$NOTES"
-          gh release upload "$TAG" "${{ steps.build.outputs.apk }}"
-          echo "published: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/tag/${TAG}"
-
-      - name: Mirror into the official module repository
-        if: ${{ env.MODULE_REPO_TOKEN != '' }}
-        env:
-          GH_TOKEN: ${{ env.MODULE_REPO_TOKEN }}
-          TAG: ${{ steps.version.outputs.tag }}
-          VER: ${{ steps.version.outputs.name }}
-          CODE: ${{ steps.version.outputs.code }}
-        run: |
-          APK="${{ steps.build.outputs.apk }}"
-          NOTES="Signed stable build of edge_download_change (versionCode ${CODE}, versionName ${VER}).
-
-          Source: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}"
-          if gh release view "$TAG" --repo "$MODULE_REPO" > /dev/null 2>&1; then
-            echo "release $TAG already exists in $MODULE_REPO, uploading the asset"
-          else
-            gh release create "$TAG" --repo "$MODULE_REPO" --title "v${VER}" --notes "$NOTES"
-          fi
-          gh release upload "$TAG" --repo "$MODULE_REPO" "$APK" --clobber
-          echo "mirrored: https://github.com/${MODULE_REPO}/releases/tag/${TAG}"
-
-      - name: Note when mirroring is not configured
-        if: ${{ env.MODULE_REPO_TOKEN == '' }}
-        run: |
-          echo "::notice title=Official module repository::Skipped. Add the MODULE_REPO_TOKEN secret (a token with write access to ${MODULE_REPO}) to publish there automatically."

@@ -535,11 +535,6 @@ final class DownloadHooks {
 
     private static void handleNewDownload(Object item, Object service) {
         if (item == null || service == null) return;
-        if (!RemoteSettings.enabled()) {
-            log(4, "interception disabled in settings, letting Edge download normally");
-            return;
-        }
-
         Object info = Reflect.get(item, "c");
         if (info == null) return;
 
@@ -558,7 +553,6 @@ final class DownloadHooks {
 
         String fileName = Reflect.pickString(info, "e", "file");
         String mime = Reflect.pickString(info, "c", "mime");
-        boolean systemManaged = Boolean.TRUE.equals(Reflect.get(item, "b"));
         PendingDownload download = buildPending(item, info, service, url, fileName, mime);
         if (download == null) return;
 
@@ -572,9 +566,6 @@ final class DownloadHooks {
             applyAction(download, decision);
             return;
         }
-
-        // Items already delegated to the system download manager need no redirection.
-        if (systemManaged) return;
 
         // Restored/history items also produce this callback (observed on device: 10+ entries
         // at startup, including unfinished ones Edge wants to resume). The device dumps show
@@ -657,10 +648,6 @@ final class DownloadHooks {
 
     /** @return true when Edge's dialog must not be shown (we took over). */
     private static boolean takeOverConfirmDialog(String text, long size, Object callback) {
-        if (!RemoteSettings.enabled()) {
-            log(4, "interception disabled in settings, leaving Edge's dialog");
-            return false;
-        }
         String name = text == null ? "" : text.trim();
         // Messages of the harmful-file / blocked dialogs also travel through this factory;
         // only plain file names are taken over so safety warnings stay intact.
@@ -817,41 +804,26 @@ final class DownloadHooks {
         }
     }
 
-    /** Hands the download to the downloader selected in the module settings. */
+    /** Hands every intercepted download to the fixed ADM Lite target. */
     private static void startSelectedDownloader(PendingDownload download) {
-        String id = RemoteSettings.downloaderId();
+        // This is a personal-use build: every intercepted download goes to ADM Lite,
+        // regardless of module settings or the UI-selected target.
+        String id = Downloaders.ID_ADM_LITE;
         Downloaders.Entry entry = Downloaders.byId(id);
-        boolean custom = Downloaders.ID_CUSTOM.equals(id);
-        if (entry == null && !custom) {
-            log(4, "unknown downloader '" + id + "', using the system downloader");
-            DialogPresenter.startSystemDownload(download);
+        if (entry == null) {
+            log(5, "fixed ADM Lite downloader entry is missing");
             return;
         }
-        if (entry != null && entry.isSystem()) {
-            DialogPresenter.startSystemDownload(download);
-            return;
-        }
-        String customPackage = RemoteSettings.customPackage();
-        String pkg = custom ? customPackage : entry.pkg;
-        if (custom && (customPackage == null || customPackage.length() == 0)) {
-            log(4, "custom downloader package not set, using the system downloader");
-            DialogPresenter.startSystemDownload(download);
-            return;
-        }
-        String label = custom ? customPackage : entry.label();
-        if (custom) {
-            entry = new Downloaders.Entry(Downloaders.ID_CUSTOM, customPackage, customPackage,
-                    Downloaders.MODE_VIEW, null);
-        }
+        String pkg = entry.pkg;
+        String label = entry.label();
         // No installed-check here: Edge's process has its own package visibility, so the
         // launch result is the only reliable signal.
         if (launchExternal(download, entry)) {
             log(4, "handed over to " + label + " (" + pkg + ")");
             return;
         }
-        log(4, "starting " + pkg + " failed, using the system downloader");
+        log(5, "starting fixed downloader " + pkg + " failed; no fallback downloader will be used");
         toastAsync(Str.downloaderFailed(label));
-        DialogPresenter.startSystemDownload(download);
     }
 
     private static boolean launchExternal(PendingDownload download, Downloaders.Entry entry) {

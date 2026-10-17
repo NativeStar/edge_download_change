@@ -23,6 +23,8 @@ final class Downloaders {
     static final int MODE_EXPLICIT = 3;
 
     static final String ID_SYSTEM = "system";
+    /** Fixed self-use target: ADM Lite (idm.internet.download.manager.plus). */
+    static final String ID_ADM_LITE = "adm_lite";
     static final String ID_CUSTOM = "custom";
 
     static final class Entry {
@@ -62,7 +64,7 @@ final class Downloaders {
             new Entry("adm", "ADM", "com.dv.adm", MODE_VIEW, null),
             new Entry("idm", "IDM", "idm.internet.download.manager", MODE_VIEW, null),
             new Entry("idm_lite", "1DM Lite", "idm.internet.download.manager.adm.lite", MODE_VIEW, null),
-            new Entry("adm_lite", "ADM Lite", "idm.internet.download.manager.plus", MODE_VIEW, null),
+            new Entry(ID_ADM_LITE, "ADM Lite", "idm.internet.download.manager.plus", MODE_VIEW, null),
             new Entry("vanda", "ADM (Vanda)", "com.vanda_adm.vanda", MODE_VIEW, null),
             new Entry("xunlei", "迅雷", "com.xunlei.downloadprovider", MODE_VIEW, null),
             new Entry("fdm", "FDM", "org.freedownloadmanager.fdm", MODE_EXPLICIT,
